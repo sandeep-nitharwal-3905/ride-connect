@@ -1,5 +1,24 @@
 const { createServer } = require('http')
 const { Server: SocketIOServer } = require('socket.io')
+const { createClient } = require('@supabase/supabase-js')
+const path = require('path')
+require('dotenv').config({ path: path.join(__dirname, '../.env.local') })
+
+// Initialize Supabase client
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY
+
+console.log('  Supabase URL:', supabaseUrl ? 'Set' : 'Missing')
+console.log('  Service Key:', supabaseServiceKey ? 'Set' : 'Missing')
+
+if (!supabaseUrl || !supabaseServiceKey) {
+  console.error('  Missing Supabase environment variables')
+  console.error('NEXT_PUBLIC_SUPABASE_URL:', supabaseUrl)
+  console.error('SUPABASE_SERVICE_ROLE_KEY:', supabaseServiceKey ? 'Present' : 'Missing')
+  process.exit(1)
+}
+
+const supabase = createClient(supabaseUrl, supabaseServiceKey)
 
 // Import database functions
 import { getPartnerVendorsForCompany } from '../lib/database'
@@ -41,25 +60,70 @@ io.on("connection", (socket: any) => {
     console.log("  Creating booking request:", bookingData)
     
     const requestId = `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
-    const requestWithId = {
-      ...bookingData,
-      requestId,
-      status: "pending",
-      createdAt: new Date().toISOString(),
-    }
 
-    // Store the booking request
-    bookingRequests.set(requestId, requestWithId)
-
-    // Get partner vendors for this company
     try {
+      // First, create the booking record in database
+      const bookingDBData: any = {
+        company_id: bookingData.companyId,
+        pickup_location: bookingData.pickupLocation,
+        dropoff_location: bookingData.destination,
+        pickup_time: bookingData.scheduledTime,
+        passenger_count: 1, // Default passenger count
+        status: "pending",
+        price: parseFloat(bookingData.estimatedFare.replace('$', '')),
+        created_at: new Date().toISOString()
+      }
+
+      // Add optional fields only if they exist in the database schema
+      if (bookingData.passengerName) {
+        bookingDBData.passenger_name = bookingData.passengerName
+      }
+      if (bookingData.passengerPhone) {
+        bookingDBData.passenger_phone = bookingData.passengerPhone
+      }
+      if (bookingData.vehicleType) {
+        bookingDBData.vehicle_type = bookingData.vehicleType
+      }
+      if (bookingData.specialRequests) {
+        bookingDBData.special_requirements = bookingData.specialRequests
+      }
+
+      console.log("  Attempting to create booking with data:", bookingDBData)
+
+      const { data: booking, error: dbError } = await supabase
+        .from('bookings')
+        .insert([bookingDBData])
+        .select()
+        .single()
+
+      if (dbError) {
+        console.error("  Database error creating booking:", dbError)
+        socket.emit("booking_request_error", { 
+          requestId, 
+          error: "Failed to save booking to database" 
+        })
+        return
+      }
+
+      const requestWithId = {
+        ...bookingData,
+        requestId,
+        bookingId: booking.id,
+        status: "pending",
+        createdAt: new Date().toISOString(),
+      }
+
+      // Store the booking request
+      bookingRequests.set(requestId, requestWithId)
+
+      // Get partner vendors for this company
       const partnerVendors = await getPartnerVendorsForCompany(bookingData.companyId)
       
       if (partnerVendors.length === 0) {
         console.log(`  No partner vendors found for company ${bookingData.companyId}`)
         socket.emit("booking_request_error", { 
           requestId, 
-          error: "No partner vendors available" 
+          error: "No partner vendors available. Please establish partnerships first." 
         })
         return
       }
@@ -76,19 +140,22 @@ io.on("connection", (socket: any) => {
         }
       }
 
-      console.log(`  Booking request ${requestId} sent to ${sentToVendors} partner vendors`)
+      console.log(`  Booking request ${requestId} sent to ${sentToVendors} partner vendors out of ${partnerVendors.length} total partners`)
       
       // Confirm to the company that sent it
       socket.emit("booking_request_created", { 
         ...requestWithId, 
-        sentToVendors 
+        bookingId: booking.id,
+        sentToVendors,
+        totalPartners: partnerVendors.length,
+        message: `Booking request sent to ${sentToVendors} available vendors`
       })
       
     } catch (error) {
-      console.error("  Error getting partner vendors:", error)
+      console.error("  Error creating booking request:", error)
       socket.emit("booking_request_error", { 
         requestId, 
-        error: "Failed to get partner vendors" 
+        error: "Failed to create booking request" 
       })
     }
   })

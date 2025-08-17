@@ -1,12 +1,14 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { useUserData } from "@/hooks/use-user-data"
+import { useSocket } from "@/hooks/use-socket"
 import { MapPin, Clock, User, Navigation, RefreshCw } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
+import SocketService from "@/lib/socket"
 
 interface OngoingRidesSectionProps {
   userId: string
@@ -15,7 +17,51 @@ interface OngoingRidesSectionProps {
 
 export function OngoingRidesSection({ userId, userType }: OngoingRidesSectionProps) {
   const { ongoingRides, loading, error, refresh } = useUserData(userId, userType)
+  const { socket, isConnected } = useSocket()
   const { toast } = useToast()
+
+  // Set up socket listeners for real-time ongoing rides updates
+  useEffect(() => {
+    if (isConnected) {
+      const socketService = SocketService.getInstance()
+      const socket = socketService.getSocket()
+
+      if (socket) {
+        const handleOngoingRidesUpdated = (data: any) => {
+          console.log("  Ongoing rides section received update:", data)
+          // Refresh ongoing rides when they're updated
+          refresh.ongoingRides()
+          
+          // Show toast notification for status changes
+          if (data.action === "added") {
+            toast({
+              title: "New Ongoing Ride",
+              description: `A ride has been ${data.status === "accepted" ? "accepted" : "started"}.`,
+            })
+          } else if (data.action === "removed") {
+            toast({
+              title: "Ride Status Updated",
+              description: `A ride has been ${data.newStatus}.`,
+            })
+          }
+        }
+
+        const handleRideStatusUpdated = (data: any) => {
+          console.log("  Ongoing rides section received status update:", data)
+          // Refresh ongoing rides when status changes
+          refresh.ongoingRides()
+        }
+
+        socket.on("ongoing_rides_updated", handleOngoingRidesUpdated)
+        socket.on("ride_status_updated", handleRideStatusUpdated)
+
+        return () => {
+          socket.off("ongoing_rides_updated", handleOngoingRidesUpdated)
+          socket.off("ride_status_updated", handleRideStatusUpdated)
+        }
+      }
+    }
+  }, [isConnected, refresh.ongoingRides, toast])
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -173,6 +219,39 @@ export function OngoingRidesSection({ userId, userType }: OngoingRidesSectionPro
                       </span>
                     </div>
                   )}
+
+                  {/* Status Action Buttons for Vendors */}
+                  {userType === 'vendor' && (
+                    <div className="flex gap-2 mt-3 pt-3 border-t">
+                      {ride.status === 'accepted' && (
+                        <Button 
+                          size="sm" 
+                          onClick={() => handleStatusUpdate(ride.id, 'in_progress')}
+                          className="bg-blue-600 hover:bg-blue-700"
+                        >
+                          Start Ride
+                        </Button>
+                      )}
+                      {ride.status === 'in_progress' && (
+                        <Button 
+                          size="sm" 
+                          onClick={() => handleStatusUpdate(ride.id, 'completed')}
+                          className="bg-green-600 hover:bg-green-700"
+                        >
+                          Complete Ride
+                        </Button>
+                      )}
+                      {(ride.status === 'accepted' || ride.status === 'in_progress') && (
+                        <Button 
+                          size="sm" 
+                          variant="destructive"
+                          onClick={() => handleStatusUpdate(ride.id, 'cancelled')}
+                        >
+                          Cancel Ride
+                        </Button>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
             ))}
@@ -181,4 +260,26 @@ export function OngoingRidesSection({ userId, userType }: OngoingRidesSectionPro
       </CardContent>
     </Card>
   )
+
+  function handleStatusUpdate(bookingId: string, newStatus: string) {
+    if (socket && isConnected) {
+      socket.emit("update_ride_status", {
+        bookingId,
+        newStatus,
+        vendorId: userId,
+        timestamp: new Date().toISOString()
+      })
+      
+      toast({
+        title: "Status Update",
+        description: `Ride status changed to ${newStatus.replace('_', ' ')}`,
+      })
+    } else {
+      toast({
+        title: "Connection Error",
+        description: "Unable to update status. Please check your connection.",
+        variant: "destructive"
+      })
+    }
+  }
 }

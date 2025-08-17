@@ -27,13 +27,15 @@ interface CreateBookingDialogProps {
   onOpenChange?: (open: boolean) => void
   companyId?: string
   companyName?: string
+  onBookingCreated?: () => void
 }
 
 export function CreateBookingDialog({ 
   open: externalOpen, 
   onOpenChange: externalOnOpenChange, 
   companyId = "company_001", 
-  companyName = "Acme Corporation" 
+  companyName = "Acme Corporation",
+  onBookingCreated
 }: CreateBookingDialogProps) {
   const [internalOpen, setInternalOpen] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
@@ -73,6 +75,11 @@ export function CreateBookingDialog({
           description: `Your booking request (ID: ${data.requestId}) has been sent to partner vendors.`,
         })
         onOpenChange(false)
+        
+        // Call the callback to refresh parent component
+        if (onBookingCreated) {
+          onBookingCreated()
+        }
       }
 
       const handleBookingStatusUpdate = (data: { requestId: string; status: string; vendorId?: string }) => {

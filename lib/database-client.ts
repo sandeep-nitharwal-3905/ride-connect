@@ -19,7 +19,10 @@ export interface Booking {
   pickup_location: string
   dropoff_location: string
   pickup_time: string
+  passenger_name?: string
+  passenger_phone?: string
   passenger_count: number
+  vehicle_type?: string
   special_requirements?: string
   status: "pending" | "accepted" | "rejected" | "completed" | "cancelled" | "in_progress"
   price?: number
@@ -139,6 +142,13 @@ export async function createBooking(bookingData: Omit<Booking, "id" | "created_a
 
 export async function updateBookingStatus(bookingId: string, status: Booking["status"], vendorId?: string): Promise<boolean> {
   try {
+    // Validate status is one of the allowed values
+    const validStatuses: Booking["status"][] = ["pending", "accepted", "rejected", "completed", "cancelled", "in_progress"]
+    if (!validStatuses.includes(status)) {
+      console.error("Invalid booking status:", status)
+      return false
+    }
+
     const updateData: any = { 
       status,
       updated_at: new Date().toISOString()

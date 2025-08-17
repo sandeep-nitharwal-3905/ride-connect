@@ -77,6 +77,29 @@ export function CompanyDashboard() {
     })
   }, [user?.id])
 
+  // Add a debounced refresh mechanism to prevent excessive API calls
+  const [refreshTimeout, setRefreshTimeout] = useState<NodeJS.Timeout | null>(null)
+  
+  const debouncedRefresh = useCallback(() => {
+    if (refreshTimeout) {
+      clearTimeout(refreshTimeout)
+    }
+    
+    const timeout = setTimeout(() => {
+      fetchAllRides()
+    }, 500) // 500ms debounce
+    
+    setRefreshTimeout(timeout)
+  }, [fetchAllRides, refreshTimeout])
+
+  useEffect(() => {
+    return () => {
+      if (refreshTimeout) {
+        clearTimeout(refreshTimeout)
+      }
+    }
+  }, [refreshTimeout])
+
   // Set up socket listeners for real-time updates
   useEffect(() => {
     if (isConnected) {
@@ -84,30 +107,125 @@ export function CompanyDashboard() {
       const socket = socketService.getSocket()
 
       if (socket) {
+        console.log("  Setting up socket listeners for company dashboard")
+        
         const handleBookingStatusUpdate = (data: any) => {
-          console.log("  Booking status update received:", data)
-          // Refresh ongoing rides and all rides when status changes
+          console.log("  [Company Dashboard] Booking status update received:", data)
+          // Immediately update the local state with the new status
+          if (data.bookingId && data.status) {
+            console.log("  [Company Dashboard] Updating ride status:", data.bookingId, "to", data.status)
+            setAllRides(prev => {
+              const updated = prev.map(ride => 
+                ride.id === data.bookingId 
+                  ? { 
+                      ...ride, 
+                      status: data.status, 
+                      vendor_id: data.vendorId, 
+                      updated_at: new Date().toISOString(),
+                      // Update vendor information if available
+                      ...(data.booking && { vendor: data.booking.vendor })
+                    }
+                  : ride
+              )
+              console.log("  [Company Dashboard] Updated rides:", updated.filter(r => r.id === data.bookingId))
+              return updated
+            })
+          }
+          // Refresh user data and use debounced refresh
           userData.refresh.ongoingRides()
-          fetchAllRides()
+          debouncedRefresh()
         }
 
         const handleNewBookingRequest = (data: any) => {
-          console.log("  New booking request received:", data)
+          console.log("  [Company Dashboard] New booking request received:", data)
           // Refresh data when new requests come in
           userData.refresh.ongoingRides()
-          fetchAllRides()
+          debouncedRefresh()
         }
 
+        const handleRideCreated = (data: any) => {
+          console.log("  [Company Dashboard] Ride created event received:", data)
+          // Refresh all rides to show the new pending ride
+          debouncedRefresh()
+        }
+
+        const handlePendingRidesUpdated = (data: any) => {
+          console.log("  [Company Dashboard] Pending rides updated:", data)
+          // Immediately update the local state if we have the booking data
+          if (data.booking && data.action === "accepted") {
+            console.log("  [Company Dashboard] Updating pending ride to accepted:", data.booking.id)
+            setAllRides(prev => {
+              const updated = prev.map(ride => 
+                ride.id === data.booking.id 
+                  ? { 
+                      ...ride, 
+                      status: "accepted", 
+                      vendor_id: data.booking.vendor_id, 
+                      vendor: data.booking.vendor,
+                      updated_at: new Date().toISOString()
+                    }
+                  : ride
+              )
+              console.log("  [Company Dashboard] Updated rides after pending update:", updated.filter(r => r.id === data.booking.id))
+              return updated
+            })
+          }
+          // Use debounced refresh to ensure consistency
+          debouncedRefresh()
+        }
+
+        const handleBookingRequestCreated = (data: any) => {
+          console.log("  [Company Dashboard] Booking request created confirmation received:", data)
+          // Refresh all rides to show the new pending ride
+          debouncedRefresh()
+        }
+
+        const handleOngoingRidesUpdated = (data: any) => {
+          console.log("  [Company Dashboard] Ongoing rides updated:", data)
+          // Refresh ongoing rides section and all rides
+          userData.refresh.ongoingRides()
+          debouncedRefresh()
+        }
+
+        // Add error handling for socket events
+        const handleSocketError = (error: any) => {
+          console.error("  [Company Dashboard] Socket error:", error)
+        }
+
+        const handleSocketConnect = () => {
+          console.log("  [Company Dashboard] Socket connected, user ID:", user?.id)
+        }
+
+        const handleSocketDisconnect = () => {
+          console.log("  [Company Dashboard] Socket disconnected")
+        }
+
+        // Set up all event listeners
+        socket.on("connect", handleSocketConnect)
+        socket.on("disconnect", handleSocketDisconnect)
+        socket.on("error", handleSocketError)
         socket.on("booking_status_update", handleBookingStatusUpdate)
         socket.on("new_booking_request", handleNewBookingRequest)
+        socket.on("ride_created", handleRideCreated)
+        socket.on("pending_rides_updated", handlePendingRidesUpdated)
+        socket.on("booking_request_created", handleBookingRequestCreated)
+        socket.on("ongoing_rides_updated", handleOngoingRidesUpdated)
 
         return () => {
+          console.log("  [Company Dashboard] Cleaning up socket listeners")
+          socket.off("connect", handleSocketConnect)
+          socket.off("disconnect", handleSocketDisconnect)
+          socket.off("error", handleSocketError)
           socket.off("booking_status_update", handleBookingStatusUpdate)
           socket.off("new_booking_request", handleNewBookingRequest)
+          socket.off("ride_created", handleRideCreated)
+          socket.off("pending_rides_updated", handlePendingRidesUpdated)
+          socket.off("booking_request_created", handleBookingRequestCreated)
+          socket.off("ongoing_rides_updated", handleOngoingRidesUpdated)
         }
       }
     }
-  }, [isConnected, userData.refresh, fetchAllRides])
+  }, [isConnected, userData.refresh, fetchAllRides, debouncedRefresh, user?.id])
 
   useEffect(() => {
     if (user?.id) {
@@ -141,6 +259,16 @@ export function CompanyDashboard() {
   const completedRides = allRides.filter(ride => ride.status === 'completed')
   const cancelledRides = allRides.filter(ride => ride.status === 'cancelled')
   const pendingRides = allRides.filter(ride => ride.status === 'pending')
+
+  // Debug logging for ride statuses
+  useEffect(() => {
+    console.log("  [Company Dashboard] Current rides state:")
+    console.log("  - Total rides:", allRides.length)
+    console.log("  - Pending rides:", pendingRides.length, pendingRides.map(r => ({ id: r.id, status: r.status })))
+    console.log("  - Ongoing rides:", ongoingRides.length, ongoingRides.map(r => ({ id: r.id, status: r.status })))
+    console.log("  - Completed rides:", completedRides.length)
+    console.log("  - Cancelled rides:", cancelledRides.length)
+  }, [allRides, pendingRides, ongoingRides, completedRides, cancelledRides])
 
   // Calculate today's rides
   const today = new Date().toDateString()
@@ -363,6 +491,7 @@ export function CompanyDashboard() {
         onOpenChange={setIsBookingDialogOpen} 
         companyId={user.id}
         companyName={user.company_name || user.email}
+        onBookingCreated={fetchAllRides}
       />
     </div>
   )

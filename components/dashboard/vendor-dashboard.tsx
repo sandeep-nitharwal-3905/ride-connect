@@ -82,6 +82,14 @@ export function VendorDashboard() {
       if (socket) {
         const handleBookingAcceptanceConfirmed = (data: any) => {
           console.log("  Booking acceptance confirmed:", data)
+          // Immediately add the booking to ongoing rides if we have the data
+          if (data.bookingId) {
+            setAllRides(prev => prev.map(ride => 
+              ride.id === data.bookingId 
+                ? { ...ride, status: "accepted", vendor_id: user?.id }
+                : ride
+            ))
+          }
           // Refresh ongoing rides when vendor accepts a booking
           userData.refresh.ongoingRides()
           fetchAllRides()
@@ -89,6 +97,14 @@ export function VendorDashboard() {
 
         const handleBookingStatusUpdate = (data: any) => {
           console.log("  Booking status update received:", data)
+          // Immediately update the booking status if we have the data
+          if (data.bookingId && data.status) {
+            setAllRides(prev => prev.map(ride => 
+              ride.id === data.bookingId 
+                ? { ...ride, status: data.status, updated_at: new Date().toISOString() }
+                : ride
+            ))
+          }
           // Refresh data when booking status changes
           userData.refresh.ongoingRides()
           fetchAllRides()
