@@ -23,6 +23,7 @@ export function CompanyDashboard() {
   const [allRides, setAllRides] = useState<Booking[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [refreshTimeout, setRefreshTimeout] = useState<NodeJS.Timeout | null>(null)
   const router = useRouter()
   const { isConnected, connect } = useSocket()
   const { user, signOut } = useAuth()
@@ -44,11 +45,36 @@ export function CompanyDashboard() {
   useEffect(() => {
     if (user?.id && !isConnected) {
       console.log("  Company dashboard connecting to socket...")
+      console.log("  [Company Dashboard] Environment check:")
+      console.log("  - NEXT_PUBLIC_SOCKET_URL:", process.env.NEXT_PUBLIC_SOCKET_URL)
+      console.log("  - NODE_ENV:", process.env.NODE_ENV)
+      console.log("  - User ID:", user.id)
+      console.log("  - User type:", user.user_type)
       connect("company", user.id)
     }
   }, [isConnected, connect, user?.id])
 
-  // Fetch all rides for the company
+  // Function to update a specific ride's status in local state
+  const updateRideStatus = useCallback((rideId: string, newStatus: string, vendorId?: string, vendor?: any) => {
+    console.log("  [Company Dashboard] Updating ride status locally:", rideId, "to", newStatus)
+    setAllRides(prev => {
+      const updated = prev.map(ride => 
+        ride.id === rideId 
+          ? { 
+              ...ride, 
+              status: newStatus as any, 
+              ...(vendorId && { vendor_id: vendorId }),
+              ...(vendor && { vendor }),
+              updated_at: new Date().toISOString()
+            }
+          : ride
+      )
+      console.log("  [Company Dashboard] Updated ride in local state:", updated.find(r => r.id === rideId))
+      return updated
+    })
+  }, [])
+
+  // Enhanced fetch function with better error handling
   const fetchAllRides = useCallback(async () => {
     if (!user?.id) return
 
@@ -56,6 +82,8 @@ export function CompanyDashboard() {
       try {
         setLoading(true)
         setError(null)
+        console.log("  [Company Dashboard] Fetching rides for company:", user.id)
+        
         const response = await fetch(`/api/bookings?companyId=${user.id}`)
         
         if (!response.ok) {
@@ -67,9 +95,10 @@ export function CompanyDashboard() {
           throw new Error(result.error)
         }
         
+        console.log("  [Company Dashboard] Fetched rides:", result.bookings?.length || 0)
         setAllRides(result.bookings || [])
       } catch (error) {
-        console.error("Error fetching rides:", error)
+        console.error("  [Company Dashboard] Error fetching rides:", error)
         setError(error instanceof Error ? error.message : "Failed to fetch rides")
       } finally {
         setLoading(false)
@@ -78,8 +107,6 @@ export function CompanyDashboard() {
   }, [user?.id])
 
   // Add a debounced refresh mechanism to prevent excessive API calls
-  const [refreshTimeout, setRefreshTimeout] = useState<NodeJS.Timeout | null>(null)
-  
   const debouncedRefresh = useCallback(() => {
     if (refreshTimeout) {
       clearTimeout(refreshTimeout)
@@ -114,22 +141,15 @@ export function CompanyDashboard() {
           // Immediately update the local state with the new status
           if (data.bookingId && data.status) {
             console.log("  [Company Dashboard] Updating ride status:", data.bookingId, "to", data.status)
-            setAllRides(prev => {
-              const updated = prev.map(ride => 
-                ride.id === data.bookingId 
-                  ? { 
-                      ...ride, 
-                      status: data.status, 
-                      vendor_id: data.vendorId, 
-                      updated_at: new Date().toISOString(),
-                      // Update vendor information if available
-                      ...(data.booking && { vendor: data.booking.vendor })
-                    }
-                  : ride
-              )
-              console.log("  [Company Dashboard] Updated rides:", updated.filter(r => r.id === data.bookingId))
-              return updated
-            })
+            updateRideStatus(data.bookingId, data.status, data.vendorId, data.booking?.vendor)
+            
+            // If status changed to accepted, also refresh the data to ensure consistency
+            if (data.status === "accepted") {
+              console.log("  [Company Dashboard] Status changed to accepted, refreshing data...")
+              setTimeout(() => {
+                fetchAllRides()
+              }, 100) // Small delay to ensure local state is updated first
+            }
           }
           // Refresh user data and use debounced refresh
           userData.refresh.ongoingRides()
@@ -154,21 +174,7 @@ export function CompanyDashboard() {
           // Immediately update the local state if we have the booking data
           if (data.booking && data.action === "accepted") {
             console.log("  [Company Dashboard] Updating pending ride to accepted:", data.booking.id)
-            setAllRides(prev => {
-              const updated = prev.map(ride => 
-                ride.id === data.booking.id 
-                  ? { 
-                      ...ride, 
-                      status: "accepted", 
-                      vendor_id: data.booking.vendor_id, 
-                      vendor: data.booking.vendor,
-                      updated_at: new Date().toISOString()
-                    }
-                  : ride
-              )
-              console.log("  [Company Dashboard] Updated rides after pending update:", updated.filter(r => r.id === data.booking.id))
-              return updated
-            })
+            updateRideStatus(data.booking.id, "accepted", data.booking.vendor_id, data.booking.vendor)
           }
           // Use debounced refresh to ensure consistency
           debouncedRefresh()
@@ -184,6 +190,17 @@ export function CompanyDashboard() {
           console.log("  [Company Dashboard] Ongoing rides updated:", data)
           // Refresh ongoing rides section and all rides
           userData.refresh.ongoingRides()
+          debouncedRefresh()
+        }
+
+        const handleRideStatusUpdated = (data: any) => {
+          console.log("  [Company Dashboard] Ride status updated:", data)
+          // Update local state immediately if we have the booking data
+          if (data.bookingId && data.status) {
+            console.log("  [Company Dashboard] Updating ride status from ride_status_updated:", data.bookingId, "to", data.status)
+            updateRideStatus(data.bookingId, data.status, data.booking?.vendor_id, data.booking?.vendor)
+          }
+          // Use debounced refresh to ensure consistency
           debouncedRefresh()
         }
 
@@ -210,6 +227,7 @@ export function CompanyDashboard() {
         socket.on("pending_rides_updated", handlePendingRidesUpdated)
         socket.on("booking_request_created", handleBookingRequestCreated)
         socket.on("ongoing_rides_updated", handleOngoingRidesUpdated)
+        socket.on("ride_status_updated", handleRideStatusUpdated)
 
         return () => {
           console.log("  [Company Dashboard] Cleaning up socket listeners")
@@ -222,16 +240,47 @@ export function CompanyDashboard() {
           socket.off("pending_rides_updated", handlePendingRidesUpdated)
           socket.off("booking_request_created", handleBookingRequestCreated)
           socket.off("ongoing_rides_updated", handleOngoingRidesUpdated)
+          socket.off("ride_status_updated", handleRideStatusUpdated)
         }
       }
     }
-  }, [isConnected, userData.refresh, fetchAllRides, debouncedRefresh, user?.id])
+  }, [isConnected, userData.refresh, fetchAllRides, debouncedRefresh, user?.id, updateRideStatus])
 
   useEffect(() => {
     if (user?.id) {
       fetchAllRides()
     }
   }, [fetchAllRides, user?.id])
+
+  // Categorize rides by status - moved before early return to prevent hooks order issues
+  const ongoingRides = allRides.filter(ride => ['accepted', 'in_progress'].includes(ride.status))
+  const completedRides = allRides.filter(ride => ride.status === 'completed')
+  const cancelledRides = allRides.filter(ride => ride.status === 'cancelled')
+  const pendingRides = allRides.filter(ride => ride.status === 'pending')
+
+  // Debug logging for ride statuses - moved before early return to prevent hooks order issues
+  useEffect(() => {
+    console.log("  [Company Dashboard] Current rides state:")
+    console.log("  - Total rides:", allRides.length)
+    console.log("  - Pending rides:", pendingRides.length, pendingRides.map(r => ({ id: r.id, status: r.status })))
+    console.log("  - Ongoing rides:", ongoingRides.length, ongoingRides.map(r => ({ id: r.id, status: r.status })))
+    console.log("  - Completed rides:", completedRides.length)
+    console.log("  - Cancelled rides:", cancelledRides.length)
+  }, [allRides, pendingRides, ongoingRides, completedRides, cancelledRides])
+
+  // Calculate today's rides - moved before early return
+  const today = new Date().toDateString()
+  const todaysRides = allRides.filter(ride => 
+    ride.created_at && new Date(ride.created_at).toDateString() === today
+  )
+
+  // Calculate success rate - moved before early return
+  const totalCompletedRides = allRides.filter(ride => 
+    ['completed', 'cancelled'].includes(ride.status)
+  ).length
+  const successRate = totalCompletedRides > 0 
+    ? ((completedRides.length / totalCompletedRides) * 100).toFixed(1)
+    : "0.0"
 
   const handleLogout = async () => {
     await signOut()
@@ -253,36 +302,6 @@ export function CompanyDashboard() {
       </div>
     )
   }
-
-  // Categorize rides by status
-  const ongoingRides = allRides.filter(ride => ['accepted', 'in_progress'].includes(ride.status))
-  const completedRides = allRides.filter(ride => ride.status === 'completed')
-  const cancelledRides = allRides.filter(ride => ride.status === 'cancelled')
-  const pendingRides = allRides.filter(ride => ride.status === 'pending')
-
-  // Debug logging for ride statuses
-  useEffect(() => {
-    console.log("  [Company Dashboard] Current rides state:")
-    console.log("  - Total rides:", allRides.length)
-    console.log("  - Pending rides:", pendingRides.length, pendingRides.map(r => ({ id: r.id, status: r.status })))
-    console.log("  - Ongoing rides:", ongoingRides.length, ongoingRides.map(r => ({ id: r.id, status: r.status })))
-    console.log("  - Completed rides:", completedRides.length)
-    console.log("  - Cancelled rides:", cancelledRides.length)
-  }, [allRides, pendingRides, ongoingRides, completedRides, cancelledRides])
-
-  // Calculate today's rides
-  const today = new Date().toDateString()
-  const todaysRides = allRides.filter(ride => 
-    ride.created_at && new Date(ride.created_at).toDateString() === today
-  )
-
-  // Calculate success rate
-  const totalCompletedRides = allRides.filter(ride => 
-    ['completed', 'cancelled'].includes(ride.status)
-  ).length
-  const successRate = totalCompletedRides > 0 
-    ? ((completedRides.length / totalCompletedRides) * 100).toFixed(1)
-    : "0.0"
 
   return (
     <div className="min-h-screen bg-background">

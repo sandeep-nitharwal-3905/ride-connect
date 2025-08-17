@@ -43,13 +43,23 @@ io.on("connection", (socket) => {
   
   if (userType && userId) {
     connectedUsers.set(socket.id, { userType, userId, socketId: socket.id })
-    console.log(`  ${userType} ${userId} connected with socket ${socket.id}`)
+    console.log(`  [Socket Server] ${userType} ${userId} connected with socket ${socket.id}`)
 
     // Join user-specific room
-    socket.join(`${userType}:${userId}`)
+    const userRoom = `${userType}:${userId}`
+    socket.join(userRoom)
+    console.log(`  [Socket Server] ${userType} ${userId} joined room: ${userRoom}`)
     
     // Join type-specific rooms
     socket.join(userType) // "company" or "vendor"
+    console.log(`  [Socket Server] ${userType} ${userId} joined type room: ${userType}`)
+    
+    // Log all rooms this socket is in
+    socket.rooms.forEach(room => {
+      console.log(`  [Socket Server] Socket ${socket.id} is in room: ${room}`)
+    })
+  } else {
+    console.log(`  [Socket Server] Socket connected without user info:`, socket.handshake.query)
   }
 
   // Handle booking request creation (from companies)

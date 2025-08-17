@@ -110,12 +110,39 @@ export function VendorDashboard() {
           fetchAllRides()
         }
 
+        const handleOngoingRidesUpdated = (data: any) => {
+          console.log("  [Vendor Dashboard] Ongoing rides updated:", data)
+          // Refresh ongoing rides when updates occur
+          userData.refresh.ongoingRides()
+          fetchAllRides()
+        }
+
+        const handleRideStatusUpdated = (data: any) => {
+          console.log("  [Vendor Dashboard] Ride status updated:", data)
+          // Update local state immediately if we have the booking data
+          if (data.bookingId && data.status) {
+            console.log("  [Vendor Dashboard] Updating ride status:", data.bookingId, "to", data.status)
+            setAllRides(prev => prev.map(ride => 
+              ride.id === data.bookingId 
+                ? { ...ride, status: data.status, updated_at: new Date().toISOString() }
+                : ride
+            ))
+          }
+          // Refresh data when ride status changes
+          userData.refresh.ongoingRides()
+          fetchAllRides()
+        }
+
         socket.on("booking_acceptance_confirmed", handleBookingAcceptanceConfirmed)
         socket.on("booking_status_update", handleBookingStatusUpdate)
+        socket.on("ongoing_rides_updated", handleOngoingRidesUpdated)
+        socket.on("ride_status_updated", handleRideStatusUpdated)
 
         return () => {
           socket.off("booking_acceptance_confirmed", handleBookingAcceptanceConfirmed)
           socket.off("booking_status_update", handleBookingStatusUpdate)
+          socket.off("ongoing_rides_updated", handleOngoingRidesUpdated)
+          socket.off("ride_status_updated", handleRideStatusUpdated)
         }
       }
     }

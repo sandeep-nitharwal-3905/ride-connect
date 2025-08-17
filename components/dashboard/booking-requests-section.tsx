@@ -49,7 +49,15 @@ export function BookingRequestsSection({ vendorId = "vendor_001" }: BookingReque
       const handleNewBookingRequest = (bookingData: BookingRequest) => {
         console.log("  New booking request received:", bookingData)
 
-        setRequests((prev) => [bookingData, ...prev])
+        setRequests((prev) => {
+          // Check if request already exists to prevent duplicates
+          const existingRequest = prev.find(req => req.id === bookingData.id)
+          if (existingRequest) {
+            console.log("  Duplicate request ignored:", bookingData.id)
+            return prev
+          }
+          return [bookingData, ...prev]
+        })
 
         toast({
           title: "New Booking Request!",
@@ -211,9 +219,9 @@ export function BookingRequestsSection({ vendorId = "vendor_001" }: BookingReque
             </div>
           ) : (
             <div className="space-y-4">
-              {pendingRequests.map((request) => (
+              {pendingRequests.map((request, index) => (
                 <div
-                  key={request.id}
+                  key={`pending-${request.id}-${index}`}
                   className={`p-4 border rounded-lg ${
                     request.urgency === "urgent" ? "border-red-200 bg-red-50" : "border-border"
                   }`}
@@ -312,8 +320,8 @@ export function BookingRequestsSection({ vendorId = "vendor_001" }: BookingReque
             </div>
           ) : (
             <div className="space-y-3">
-              {processedRequests.map((request) => (
-                <div key={request.id} className="flex items-center justify-between p-3 border rounded-lg">
+              {processedRequests.map((request, index) => (
+                <div key={`processed-${request.id}-${index}`} className="flex items-center justify-between p-3 border rounded-lg">
                   <div className="flex items-center gap-4">
                     <div>
                       <div className="font-medium">#{request.id}</div>

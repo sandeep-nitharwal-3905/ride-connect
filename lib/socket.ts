@@ -14,23 +14,26 @@ class SocketService {
   connect(userType: "company" | "vendor", userId: string): Socket {
     if (!this.socket) {
       const socketUrl = process.env.NEXT_PUBLIC_SOCKET_URL || "http://localhost:3000"
-      console.log("  Connecting to socket server at:", socketUrl)
-      console.log("  Environment variable NEXT_PUBLIC_SOCKET_URL:", process.env.NEXT_PUBLIC_SOCKET_URL)
+      console.log("  [SocketService] Environment variables:")
+      console.log("  - NEXT_PUBLIC_SOCKET_URL:", process.env.NEXT_PUBLIC_SOCKET_URL)
+      console.log("  - NODE_ENV:", process.env.NODE_ENV)
+      console.log("  [SocketService] Connecting to socket server at:", socketUrl)
+      console.log("  [SocketService] User type:", userType, "User ID:", userId)
       
       this.socket = io(socketUrl, {
         query: { userType, userId },
       })
 
       this.socket.on("connect", () => {
-        console.log("  Socket connected:", this.socket?.id)
+        console.log("  [SocketService] Socket connected:", this.socket?.id)
       })
 
       this.socket.on("disconnect", () => {
-        console.log("  Socket disconnected")
+        console.log("  [SocketService] Socket disconnected")
       })
 
       this.socket.on("connect_error", (error) => {
-        console.log("  Socket connection error:", error)
+        console.error("  [SocketService] Socket connection error:", error)
       })
     }
 
