@@ -1,0 +1,19 @@
+{
+  "name": "ride-connect-socket-server",
+  "version": "1.0.0",
+  "description": "Socket.IO server for Ride Connect",
+  "main": "socket-server.js",
+  "scripts": {
+    "start": "node socket-server.js",
+    "dev": "node socket-server.js"
+  },
+  "dependencies": {
+    "socket.io": "^4.7.5",
+    "@supabase/supabase-js": "^2.39.3",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

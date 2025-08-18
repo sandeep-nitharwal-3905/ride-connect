@@ -393,8 +393,8 @@ io.on("connection", (socket) => {
 })
 
 // Start the server
-const port = process.env.SOCKET_PORT || 3001
-httpServer.listen(port, () => {
+const port = process.env.PORT || process.env.SOCKET_PORT || 3001
+httpServer.listen(port, '0.0.0.0', () => {
   console.log(`  Socket.IO server running on port ${port}`)
 })
 
