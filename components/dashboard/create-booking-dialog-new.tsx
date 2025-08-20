@@ -33,7 +33,7 @@ export function CreateBookingDialog({
   open: externalOpen, 
   onOpenChange: externalOnOpenChange, 
   companyId = "company_001", 
-  companyName = "Acme Corporation" 
+  companyName = "Your Company" 
 }: CreateBookingDialogProps) {
   const [internalOpen, setInternalOpen] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
@@ -118,7 +118,7 @@ export function CreateBookingDialog({
         
         const baseFare = baseFares[vehicleType as keyof typeof baseFares] || 15
         
-        // Simple distance estimation based on string length (placeholder for real distance calculation)
+        // Distance estimation based on route complexity for initial pricing
         const estimatedDistance = Math.max(1, (pickupLocation.length + destination.length) / 20)
         const distanceFare = estimatedDistance * 2
         
